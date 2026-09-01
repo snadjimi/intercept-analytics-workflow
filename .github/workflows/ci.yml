@@ -1,0 +1,206 @@
+# .github/workflows/ci.yml
+#
+# The five checks that run on every pull request into main, cheapest first, so a
+# ten second formatting failure never waits behind a six minute retrain.
+# Every line is commented with why it is here, not what it does.
+
+name: checks
+
+# WHEN THIS RUNS.
+# pull_request fires on open, reopen, and every push to the branch afterwards.
+# We also run on pushes to main so the recorded baseline stays current.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# CANCEL SUPERSEDED RUNS.
+# Two pushes a minute apart means the first run is pointless and still costs money.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# LEAST PRIVILEGE. Read only by default. Only the score check needs to write,
+# and only to leave its comment on the pull request.
+permissions:
+  contents: read
+
+jobs:
+
+  # LAYER 1, HYGIENE. The cheapest checks, so the cheapest mistakes fail fastest.
+  # Nothing here is a matter of taste, which is the point: it takes style out of
+  # code review entirely.
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A secret committed and then deleted is still in the history and still
+          # compromised, so the scan needs every commit, not just the newest.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      # Report, never fix. CI must not push commits back to someone's branch.
+      - name: formatting
+        run: ruff format --check .
+      - name: lint
+        run: ruff check .
+
+      # Notebook outputs must never be committed. They make diffs unreadable, they
+      # bloat the repository, and they are the most common way client data leaks in.
+      - name: no notebook outputs committed
+        run: |
+          for f in $(git ls-files '*.ipynb'); do
+            if grep -q '"output_type"' "$f"; then
+              echo "::error file=$f::Notebook still has outputs. Run nbstripout."
+              exit 1
+            fi
+          done
+          echo "no notebooks with outputs"
+
+      # Data does not belong in Git. A backstop for a forgotten .gitignore, because
+      # a large file cannot be cleanly removed once it is in the history.
+      - name: no large files
+        run: |
+          big=$(find . -path ./.git -prune -o -type f -size +10M -print)
+          if [ -n "$big" ]; then echo "::error::Too large: $big"; exit 1; fi
+          echo "nothing oversized"
+
+      # Credentials in a repository are unrecoverable. Rotating them is the only
+      # fix, so this has to be preventative. gitleaks is the fuller tool; this
+      # pattern check needs no extra service.
+      - name: no credentials
+        run: |
+          if grep -rInE 'AKIA[0-9A-Z]{16}|(password|secret|api_key)[[:space:]]*=[[:space:]]*.[A-Za-z0-9]' \
+             src/ tests/ config/; then
+            echo "::error::Possible credential committed."; exit 1
+          fi
+          echo "no credentials found"
+
+      # The purest form of "works on my machine".
+      - name: no absolute paths
+        run: |
+          if grep -rnE '/(Users|home)/[a-z]+/' src/ tests/ --include='*.py'; then
+            echo "::error::Hard coded local path. Use config/."; exit 1
+          fi
+          echo "no absolute paths"
+
+  # LAYER 2, TESTS. We do not test whether the model is good. That is a judgement
+  # call and it belongs to the reviewer. We test that the pipeline does what it
+  # claims: the join does not duplicate rows, the boundary is where it says it is,
+  # nulls do not quietly pass through.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: pytest
+        run: pytest -q --durations=5
+
+  # LAYER 3, DATA CONTRACT. Runs against a small committed sample, never live
+  # client data, so it is fast and safe on a public runner. Catches an upstream
+  # column being renamed before it reaches a client number.
+  data-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: schema and null rate
+        run: python -m src.contracts.validate data/sample/customers.csv
+
+  # LAYER 4, SCORE CHECK. The expensive one. Needs the tests to pass first, because
+  # there is no point re-scoring on a broken pipeline.
+  score-check:
+    runs-on: ubuntu-latest
+    needs: [tests]
+    permissions:
+      contents: read
+      pull-requests: write        # only so it can leave its comment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      # Scores the setting in config against the recorded baseline. The tolerance
+      # exists because sampling noise is real, and a check that flaps is a check
+      # people learn to click through.
+      - name: score against baseline
+        run: |
+          python -m src.models.evaluate \
+            --customers data/sample/customers.csv \
+            --baseline metrics/baseline.json \
+            --out metrics/pr.json
+
+      # Puts the before and after on the pull request, so the reviewer sees which
+      # number moved without leaving the review. The author claims it in the
+      # template; this verifies it.
+      - name: comment the numbers
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('metrics/pr.json', 'utf8'));
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: [
+                '**score check**', '',
+                '| | baseline | this PR |', '| --- | --- | --- |',
+                `| accuracy | ${m.last_time.accuracy} | ${m.this_change.accuracy} |`,
+                `| quiet days | ${m.last_time.quiet_days}d | ${m.this_change.quiet_days}d |`,
+                '', `_lowest allowed is ${m.lowest_allowed}. Scored on the fixed synthetic sample._`
+              ].join('\n')
+            });
+
+  # LAYER 5, REPRODUCIBILITY. Runs the same thing twice and demands identical
+  # output. Catches an unpinned seed, dictionary ordering, anything reaching for
+  # the clock. If this fails, last month's numbers cannot be rebuilt, which is the
+  # one promise the whole workflow makes.
+  reproducibility:
+    runs-on: ubuntu-latest
+    needs: [tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: same answer twice
+        run: |
+          python -m src.models.evaluate --customers data/sample/customers.csv \
+            --baseline metrics/baseline.json --out /tmp/a.json > /dev/null
+          python -m src.models.evaluate --customers data/sample/customers.csv \
+            --baseline metrics/baseline.json --out /tmp/b.json > /dev/null
+          if ! cmp -s /tmp/a.json /tmp/b.json; then
+            echo "::error::Two identical runs gave different answers."; exit 1
+          fi
+          echo "identical across two runs"
+
+# WHAT MAKES ANY OF THIS BINDING
+# Nothing in this file blocks anything. It runs and it reports, and that is all.
+# It becomes a gate only when these five job names are added under
+# Settings, Rules, Rulesets, as required status checks, alongside
+# "require a pull request before merging" and
+# "require branches to be up to date before merging".
+#
+# That last rule is what drags a merge conflict into the pull request, while it is
+# still cheap, instead of letting it land on main.

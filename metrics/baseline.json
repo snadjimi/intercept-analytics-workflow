@@ -1,0 +1,5 @@
+{
+  "accuracy": 0.81,
+  "quiet_days": 30,
+  "lowest_allowed": 0.79
+}

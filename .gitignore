@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# Generated CI output
+metrics/pr.json
+
+# Real client data must never enter Git
+data/raw/
+data/private/
+data/client/
+
+# Trained model binaries live outside Git
+models/*.pkl
+models/*.joblib
+models/*.onnx

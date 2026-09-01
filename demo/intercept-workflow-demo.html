@@ -1,0 +1,1418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intercept · How a client number gets built</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..800;1,62..125,400..700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* dark frame: the instrument housing */
+  --d0:#0E141D;      /* deepest, header + narrator */
+  --d1:#131B26;      /* rail ground */
+  --d2:#1B2634;      /* raised on dark */
+  --d3:#26344687;    /* hairline on dark */
+  --dtx:#E8EDF4;     /* text on dark */
+  --dmut:#7F90A8;    /* muted on dark */
+
+  /* light workspace: where the work happens */
+  --l0:#EDF0F5;      /* stage ground */
+  --l1:#FFFFFF;      /* card */
+  --l2:#F3F5F9;      /* card header */
+  --ink:#101722;
+  --mut:#68748A;
+  --rule:#DCE1E9;
+  --rule2:#C6CDD9;
+
+  /* semantics: same meanings on both grounds */
+  --trunk:#1F3B5C;   --trunk-d:#77A4DE;
+  --work:#8A5E14;    --work-d:#E2A64C;
+  --pass:#256B4F;    --pass-d:#45B187;
+  --fail:#9B3720;    --fail-d:#E0745A;
+
+  --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+  --sans:'Archivo',system-ui,sans-serif;
+  --sh:0 1px 2px rgba(16,23,34,.05),0 4px 14px rgba(16,23,34,.06);
+  --sh-lg:0 2px 6px rgba(16,23,34,.07),0 18px 44px rgba(16,23,34,.11);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--d0);color:var(--ink);
+  font-family:var(--sans);font-variation-settings:'wdth' 100;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.eyebrow{
+  font-size:10px;font-weight:600;letter-spacing:.19em;text-transform:uppercase;
+  font-variation-settings:'wdth' 115;
+}
+
+/* ═══════════ COVER ═══════════ */
+#cover{
+  position:fixed;inset:0;z-index:60;background:var(--d0);
+  display:flex;align-items:center;justify-content:center;
+  transition:opacity .55s ease,visibility .55s;
+}
+#cover.gone{opacity:0;visibility:hidden;pointer-events:none}
+.cover-in{
+  display:grid;grid-template-columns:1fr 300px;gap:70px;align-items:center;
+  max-width:1060px;padding:40px;
+}
+.cover-in .eyebrow{color:var(--work-d);margin-bottom:22px}
+.cover-in h1{
+  font-size:52px;line-height:1.03;margin:0;color:var(--dtx);font-weight:800;
+  letter-spacing:-.028em;font-variation-settings:'wdth' 90;
+}
+.cover-in h1 em{font-style:normal;color:var(--work-d)}
+.cover-in .lede{
+  color:var(--dmut);font-size:16.5px;line-height:1.6;margin:22px 0 0;max-width:50ch;
+}
+.cover-in .lede b{color:var(--dtx);font-weight:600}
+.cover-cta{display:flex;align-items:center;gap:16px;margin-top:36px}
+.kbd{
+  font-family:var(--mono);font-size:11px;color:var(--dmut);
+  border:1px solid var(--d3);border-radius:3px;padding:4px 9px;
+}
+.cover-art{position:relative;height:560px;display:flex;align-items:center;justify-content:center}
+.cover-art::before{content:'';position:absolute;width:340px;height:340px;border-radius:50%;
+  background:radial-gradient(circle,rgba(119,164,222,.13),transparent 68%)}
+.cover-art .graph{position:relative;transform:translateX(-46px)}
+
+/* ═══════════ HEADER ═══════════ */
+.top{
+  display:flex;align-items:center;gap:18px;padding:0 24px;height:58px;
+  background:var(--d0);flex:0 0 auto;position:relative;z-index:20;
+}
+.brand{
+  font-weight:700;font-size:12.5px;color:var(--dtx);letter-spacing:.01em;
+  font-variation-settings:'wdth' 84;white-space:nowrap;
+}
+.brand span{color:var(--dmut);font-weight:500}
+.shield{
+  display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--trunk-d);
+  border:1px solid var(--d3);border-radius:20px;padding:4px 11px 4px 9px;white-space:nowrap;
+}
+.shield b{font-weight:600;color:var(--dtx)}
+
+/* progress rail: 10 segments, clickable */
+.prog{display:flex;gap:4px;flex:1;align-items:center;min-width:0;padding:0 8px}
+.seg{
+  flex:1;height:3px;background:#2A374A;border:0;border-radius:2px;padding:0;cursor:pointer;
+  position:relative;transition:background .25s,transform .18s;min-width:8px;
+}
+.seg::after{content:'';position:absolute;inset:-10px 0}
+.seg:hover{transform:scaleY(2.2)}
+.seg.done{background:var(--trunk-d)}
+.seg.now{background:var(--work-d);transform:scaleY(2.2)}
+.seg:focus-visible{outline:2px solid var(--work-d);outline-offset:5px}
+
+.counter{font-family:var(--mono);font-size:11px;color:var(--dmut);white-space:nowrap}
+.counter b{color:var(--dtx);font-weight:600}
+.nav{display:flex;gap:6px}
+.btn{
+  font-family:var(--sans);font-size:12px;font-weight:600;white-space:nowrap;
+  border:1px solid var(--d3);background:transparent;color:var(--dtx);
+  padding:7px 14px;border-radius:4px;cursor:pointer;transition:background .14s,border-color .14s,opacity .14s;
+}
+.btn:hover:not(:disabled){background:var(--d2);border-color:#3A4A60}
+.btn:disabled{opacity:.28;cursor:default}
+.btn.solid{background:var(--trunk-d);border-color:var(--trunk-d);color:#0E141D}
+.btn.solid:hover:not(:disabled){background:#8FB6E8;border-color:#8FB6E8}
+.btn.ghost{color:var(--dmut);padding:7px 11px}
+.btn.ghost[aria-pressed="true"]{color:var(--work-d);border-color:var(--work-d)}
+:focus-visible{outline:2px solid var(--work-d);outline-offset:3px}
+
+/* ═══════════ BODY ═══════════ */
+.main{flex:1;display:grid;grid-template-columns:376px 1fr;min-height:0;position:relative}
+
+/* ── rail: the hero graph ── */
+.rail{
+  background:var(--d1);padding:24px 22px 30px;overflow-y:auto;position:relative;
+  background-image:radial-gradient(circle at 1px 1px,rgba(122,145,180,.11) 1px,transparent 0);
+  background-size:22px 22px;
+}
+.rail::-webkit-scrollbar{width:6px}
+.rail::-webkit-scrollbar-thumb{background:#2C3A4D;border-radius:3px}
+.rail h2{font-size:10px;margin:0 0 3px;font-weight:600;letter-spacing:.19em;text-transform:uppercase;
+  font-variation-settings:'wdth' 115;color:var(--dmut)}
+.rail .sub{font-family:var(--mono);font-size:10px;color:#5B6B82;margin-bottom:22px}
+.graph{position:relative}
+.graph svg{display:block;overflow:visible}
+.gpath{fill:none;stroke-linecap:round}
+.ghalo{transition:opacity .4s ease}
+.gnode{stroke:var(--d1);stroke-width:3}
+.gring{fill:none;stroke-width:2}
+.gpulse{fill:none;stroke:var(--work-d);stroke-width:1.5;opacity:0}
+@keyframes pulse{
+  0%{r:9;opacity:.85} 100%{r:19;opacity:0}
+}
+.gpulse.on{animation:pulse 2.1s ease-out infinite}
+.glabel{
+  position:absolute;left:172px;line-height:1.25;
+  transition:opacity .4s ease,transform .4s ease;
+}
+.glabel .bname{
+  font-family:var(--mono);font-size:9.5px;color:var(--work-d);font-weight:600;
+  margin-bottom:3px;letter-spacing:-.01em;opacity:.9;
+}
+.glabel .sha{font-family:var(--mono);font-size:9.5px;color:#5F7189;letter-spacing:.02em}
+.glabel .msg{font-size:11.5px;font-weight:500;margin-top:2px;max-width:158px;color:var(--dtx)}
+.glabel.cur .msg{color:#fff;font-weight:600}
+.glabel .tag{
+  display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-family:var(--mono);font-size:9px;
+  background:rgba(119,164,222,.13);border:1px solid rgba(119,164,222,.4);color:var(--trunk-d);
+  padding:2px 7px 2px 5px;border-radius:3px;letter-spacing:.01em;
+}
+.glabel .tag b{font-weight:700;opacity:.6;font-size:8px;letter-spacing:.1em}
+.hid{opacity:0;transform:translateY(-6px)}
+.legend{margin-top:30px;padding-top:16px;border-top:1px solid var(--d3);display:grid;gap:9px}
+.legend div{display:flex;align-items:center;gap:9px;font-size:10.5px;color:var(--dmut)}
+.sw{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+
+/* ── stage: the light workspace ── */
+.stagewrap{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--l0)}
+.stage{flex:1;overflow-y:auto;padding:30px 34px 34px}
+.stage::-webkit-scrollbar{width:8px}
+.stage::-webkit-scrollbar-thumb{background:#CBD2DD;border-radius:4px}
+.stage-head{margin-bottom:22px}
+.stage-head .eyebrow{color:var(--work)}
+.stage-head h1{
+  font-size:29px;margin:7px 0 0;font-weight:700;letter-spacing:-.024em;color:var(--ink);
+  font-variation-settings:'wdth' 90;line-height:1.14;
+}
+@keyframes rise{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.anim>*{animation:rise .42s cubic-bezier(.2,.7,.3,1) both}
+.anim>*:nth-child(2){animation-delay:.05s}
+.anim>*:nth-child(3){animation-delay:.1s}
+
+.grid{display:grid;gap:18px}
+@media(min-width:1200px){.grid.two{grid-template-columns:1fr 1fr;align-items:start}}
+.grid .span{grid-column:1/-1}
+
+/* file tree */
+.tree{font-family:var(--mono);font-size:11.5px;line-height:1.95;display:grid;
+  grid-template-columns:auto 1fr;gap:0 26px}
+.tree .p{color:var(--ink);white-space:pre}
+.tree .p b{color:var(--trunk);font-weight:700}
+.tree .p i{color:var(--work);font-style:normal;font-weight:700}
+.tree .a{color:#93A0B4;font-size:10.5px;align-self:center}
+
+.card svg{max-width:100%;max-height:100%}
+.card{background:var(--l1);border:1px solid var(--rule);border-radius:7px;overflow:hidden;box-shadow:var(--sh)}
+.card.hero{box-shadow:var(--sh-lg)}
+.card-h{
+  display:flex;align-items:center;gap:10px;padding:10px 15px;
+  border-bottom:1px solid var(--rule);background:var(--l2);
+}
+.card-h .t{font-size:10px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;
+  font-variation-settings:'wdth' 112;color:var(--mut)}
+.card-h .f{margin-left:auto;font-family:var(--mono);font-size:10px;color:#93A0B4}
+.card-b{padding:15px}
+.card-b.flush{padding:0}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+
+/* terminal */
+.term{font-family:var(--mono);font-size:12px;line-height:1.68;padding:14px 15px;white-space:pre-wrap;word-break:break-word}
+.term .cmd{color:var(--ink);font-weight:600}
+.term .cmd::before{content:'$';color:var(--work);margin-right:8px;font-weight:700}
+.term .out{color:var(--mut)}
+.term .warn{color:var(--fail);font-weight:500}
+.term .good{color:var(--pass);font-weight:600}
+
+/* diff */
+.diff{font-family:var(--mono);font-size:11.5px;line-height:1.72}
+.diff .row{display:flex;padding:0 14px 0 0}
+.diff .n{width:38px;flex:0 0 38px;text-align:right;padding-right:11px;color:#AEB8C7;user-select:none;font-size:10.5px}
+.diff .g{width:15px;flex:0 0 15px;color:var(--mut);user-select:none;font-weight:700}
+.diff .c{white-space:pre-wrap;word-break:break-word}
+.diff .add{background:rgba(37,107,79,.10)}
+.diff .add .g{color:var(--pass)}
+.diff .del{background:rgba(155,55,32,.09)}
+.diff .del .g{color:var(--fail)}
+.diff .hunk{background:var(--l2);color:#8B97AB;padding:5px 14px 5px 53px;border-block:1px solid var(--rule)}
+.diff .mk{padding:3px 14px 3px 53px;font-weight:600;font-size:10.5px;letter-spacing:.02em;
+  display:flex;align-items:center;gap:8px}
+.diff .mk-o{background:rgba(138,94,20,.14);color:var(--work);border-left:3px solid var(--work);padding-left:50px}
+.diff .mk-t{background:rgba(31,59,92,.10);color:var(--trunk);border-left:3px solid var(--trunk);padding-left:50px}
+.diff .mk-s{background:var(--l2);color:#93A0B4;border-left:3px solid var(--rule2);padding-left:50px}
+.diff .side-o{border-left:3px solid rgba(138,94,20,.35)}
+.diff .side-t{border-left:3px solid rgba(31,59,92,.3)}
+.diff .side-o .n,.diff .side-t .n{width:35px;flex:0 0 35px}
+.tagx{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.1em;opacity:.7;margin-left:auto}
+
+/* pull request */
+.pr-top{padding:16px}
+.pr-title{font-size:19px;font-weight:700;letter-spacing:-.018em;font-variation-settings:'wdth' 92}
+.pr-meta{font-family:var(--mono);font-size:10.5px;color:var(--mut);margin-top:9px;
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.pr-meta b{color:var(--trunk);font-weight:600}
+.pill{
+  display:inline-flex;align-items:center;gap:5px;font-size:9.5px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;padding:3px 9px;border-radius:20px;font-variation-settings:'wdth' 108;
+  font-family:var(--sans);
+}
+.pill.open{background:var(--trunk);color:#fff}
+.pill.ok{background:var(--pass);color:#fff}
+.pill.bad{background:var(--fail);color:#fff}
+.prbody{padding:0 16px 16px}
+.prbody h4{font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);
+  margin:16px 0 5px;font-variation-settings:'wdth' 112}
+.prbody p{margin:0;font-size:13px;line-height:1.6}
+.flagged{
+  background:rgba(226,166,76,.09);border:1px solid rgba(138,94,20,.22);border-radius:5px;
+  padding:2px 14px 13px;margin:14px -2px 0;
+}
+.flagged h4{color:var(--work);margin-top:12px}
+.num{font-family:var(--mono);font-size:13px;line-height:1.75;font-weight:500}
+.num i{font-style:normal;color:var(--pass);font-weight:700}
+
+/* CI */
+.ci-bar{height:2px;background:var(--rule);position:relative;overflow:hidden}
+.ci-bar i{position:absolute;inset:0 100% 0 0;background:var(--work);transition:right .5s linear}
+.ci-row{
+  display:flex;align-items:center;gap:13px;padding:11px 15px;
+  border-bottom:1px solid var(--rule);font-size:12.5px;
+  opacity:0;transform:translateX(-7px);transition:opacity .34s,transform .34s;
+}
+.ci-row.in{opacity:1;transform:none}
+.ci-row:last-child{border-bottom:0}
+.ci-ic{width:22px;height:22px;flex:0 0 22px;border-radius:50%;position:relative;
+  display:flex;align-items:center;justify-content:center}
+.ci-ic.run{border:2px solid var(--rule2);border-top-color:var(--work);animation:spin .75s linear infinite}
+.ci-ic.ok{background:var(--pass)}
+.ci-ic.bad{background:var(--fail)}
+.ci-ic svg{width:12px;height:12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ci-n{font-weight:700;min-width:118px;font-size:12px;display:flex;align-items:center;gap:7px}
+.ci-n svg{width:13px;height:13px;color:var(--mut);flex:0 0 13px}
+.ci-d{color:var(--mut);font-family:var(--mono);font-size:10.5px;flex:1;line-height:1.4}
+.ci-t{font-family:var(--mono);font-size:10px;color:#9BA7BA}
+.ci-sum{padding:12px 15px;font-size:12.5px;font-weight:700;border-top:1px solid var(--rule);
+  display:flex;align-items:center;gap:9px}
+.ci-sum svg{width:17px;height:17px;flex:0 0 17px}
+.ci-sum.ok{color:var(--pass);background:rgba(37,107,79,.06)}
+.ci-sum.bad{color:var(--fail);background:rgba(155,55,32,.06)}
+
+/* review comments */
+.cm{padding:14px 15px;border-bottom:1px solid var(--rule)}
+.cm:last-child{border-bottom:0}
+.cm-h{display:flex;align-items:center;gap:9px;margin-bottom:8px;flex-wrap:wrap}
+.av{width:20px;height:20px;border-radius:50%;background:var(--trunk);color:#fff;font-size:9px;
+  font-weight:700;display:flex;align-items:center;justify-content:center;flex:0 0 20px}
+.av.b{background:var(--work)}
+.cm-a{font-size:12px;font-weight:700}
+.cm-l{font-family:var(--mono);font-size:10px;color:#93A0B4;margin-left:auto}
+.cm-b{font-size:12.5px;line-height:1.6}
+.cm-b code{font-family:var(--mono);font-size:11.5px;background:var(--l2);padding:1px 5px;border-radius:3px}
+.kind{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.04em}
+.kind.block{background:var(--fail);color:#fff}
+.kind.q{background:var(--trunk);color:#fff}
+.kind.nit{background:var(--rule);color:var(--mut)}
+.kind.ok{background:var(--pass);color:#fff}
+.cm-code{font-family:var(--mono);font-size:11px;background:var(--l2);border-left:3px solid var(--rule2);
+  padding:7px 11px;margin:0 0 9px;color:var(--mut);border-radius:0 4px 4px 0;overflow-x:auto}
+
+/* resolver */
+.res-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 15px;border-top:1px solid var(--rule);background:var(--l2)}
+.res{
+  font-family:var(--sans);text-align:left;padding:11px 13px;border-radius:6px;cursor:pointer;
+  border:1.5px solid var(--rule2);background:var(--l1);color:var(--ink);transition:all .16s;
+}
+.res:hover{border-color:var(--mut);transform:translateY(-1px);box-shadow:var(--sh)}
+.res b{display:block;font-size:12.5px;font-weight:700;margin-bottom:3px}
+.res span{display:block;font-size:10.5px;color:var(--mut);line-height:1.4}
+.res.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.res.on span{color:#A6B2C4}
+.res-hint{padding:0 15px 14px;background:var(--l2);font-size:11.5px;color:var(--mut);font-style:italic}
+.res-out{padding:14px 15px;border-top:1px solid var(--rule)}
+.verdict{font-weight:700;font-size:14px;display:flex;align-items:center;gap:9px;margin-bottom:7px}
+.verdict svg{width:16px;height:16px}
+.res-out.bad{background:rgba(155,55,32,.05)} .res-out.bad .verdict{color:var(--fail)}
+.res-out.ok{background:rgba(37,107,79,.05)} .res-out.ok .verdict{color:var(--pass)}
+.res-out.mid{background:rgba(226,166,76,.08)} .res-out.mid .verdict{color:var(--work)}
+
+/* artifact */
+.kv{font-family:var(--mono);font-size:11.5px;line-height:2.05}
+.kv .k{display:inline-block;width:96px;color:#93A0B4}
+.kv .v{color:var(--ink);font-weight:500}
+.kv .v.hi{color:var(--trunk);font-weight:700}
+
+/* rules */
+.rules{list-style:none;margin:0;padding:0;font-size:12.5px;line-height:1.5}
+.rules li{padding:11px 15px;border-bottom:1px solid var(--rule);display:flex;gap:11px;align-items:flex-start}
+.rules li:last-child{border-bottom:0}
+.rules svg{width:14px;height:14px;flex:0 0 14px;margin-top:2px;color:var(--trunk)}
+.rules.no svg{color:var(--fail)}
+
+.note{font-size:12.5px;line-height:1.6;color:var(--mut);margin:0}
+.note b{color:var(--ink);font-weight:600}
+.big{font-size:15px;font-weight:600;line-height:1.5;margin:0 0 10px;color:var(--ink);letter-spacing:-.01em}
+.jump{background:var(--trunk);border:0;color:#fff;font-family:var(--sans);font-size:12px;font-weight:600;
+  cursor:pointer;padding:8px 14px;border-radius:5px;transition:background .14s}
+.jump:hover{background:#2A5182}
+
+/* ═══════════ NARRATOR ═══════════ */
+.narr{
+  flex:0 0 auto;background:var(--d0);padding:17px 34px 19px;
+  display:grid;grid-template-columns:1fr 1fr;gap:34px;
+}
+.narr .blk h3{font-size:9.5px;font-weight:700;letter-spacing:.19em;text-transform:uppercase;
+  margin:0 0 6px;font-variation-settings:'wdth' 115;color:var(--dmut)}
+.narr .blk p{margin:0;font-size:13px;line-height:1.56;max-width:64ch;color:var(--dtx)}
+.narr .why h3{color:var(--work-d)}
+.narr .why{border-left:2px solid var(--work-d);padding-left:17px}
+.pnotes{grid-column:1/-1;border-top:1px solid var(--d3);padding-top:13px;margin-top:3px;
+  font-size:12.5px;line-height:1.6;color:var(--dmut)}
+.pnotes b{color:var(--dtx);font-weight:600}
+.pnotes code{font-family:var(--mono);font-size:11.5px;color:var(--work-d)}
+.pnotes.off{display:none}
+
+
+/* ═══════════ COMMIT INSPECTOR ═══════════ */
+.gnode,.glabel{cursor:pointer}
+.glabel:hover .msg{color:#fff}
+.gnode:hover{stroke:var(--work-d)}
+.glabel.sel .msg{color:var(--work-d)}
+#insp{
+  position:fixed;top:0;right:0;bottom:0;width:372px;background:var(--d1);z-index:40;
+  border-left:1px solid var(--d3);transform:translateX(100%);transition:transform .34s cubic-bezier(.3,.9,.3,1);
+  display:flex;flex-direction:column;box-shadow:-18px 0 44px rgba(0,0,0,.34);
+}
+#insp.open{transform:none}
+.insp-h{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--d3)}
+.insp-h .eyebrow{color:var(--dmut)}
+.insp-x{margin-left:auto;background:none;border:0;color:var(--dmut);cursor:pointer;font-size:19px;
+  line-height:1;padding:2px 6px;border-radius:4px}
+.insp-x:hover{color:var(--dtx);background:var(--d2)}
+.insp-b{padding:20px;overflow-y:auto;flex:1}
+.insp-sha{font-family:var(--mono);font-size:19px;color:var(--dtx);font-weight:600;letter-spacing:.01em}
+.insp-msg{font-size:15px;color:var(--dtx);margin:10px 0 0;font-weight:600;line-height:1.35}
+.insp-row{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--d3);font-size:12px}
+.insp-row .k{width:82px;flex:0 0 82px;color:var(--dmut);font-family:var(--mono);font-size:10.5px;padding-top:1px}
+.insp-row .v{color:var(--dtx);line-height:1.5}
+.insp-row .v .mono{font-family:var(--mono);font-size:11px}
+.insp-why{margin-top:20px;padding:15px;background:var(--d2);border-radius:6px;
+  border-left:2px solid var(--work-d)}
+.insp-why h4{margin:0 0 7px;font-size:9.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--work-d);font-variation-settings:'wdth' 112}
+.insp-why p{margin:0;font-size:12.5px;line-height:1.62;color:var(--dtx)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;
+  padding:2px 8px;border-radius:20px;border:1px solid var(--d3);color:var(--dmut)}
+.chip.ok{color:var(--pass-d);border-color:rgba(69,177,135,.4)}
+.chip.bad{color:var(--fail-d);border-color:rgba(224,116,90,.45)}
+.chip.tag{color:var(--trunk-d);border-color:rgba(119,164,222,.42)}
+
+/* ═══════════ CHECK TOGGLES ═══════════ */
+.tog-bar{display:flex;gap:7px;padding:12px 15px;background:var(--l2);border-bottom:1px solid var(--rule);
+  flex-wrap:wrap;align-items:center}
+.tog-bar .lbl{font-size:10px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--mut);font-variation-settings:'wdth' 112;margin-right:4px}
+.tog{font-family:var(--mono);font-size:10.5px;padding:5px 11px;border-radius:20px;cursor:pointer;
+  border:1px solid var(--rule2);background:var(--l1);color:var(--ink);transition:all .15s;
+  display:inline-flex;align-items:center;gap:6px}
+.tog::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--pass)}
+.tog:hover{border-color:var(--mut)}
+.tog.off{background:var(--l2);color:#A3AEBF;border-style:dashed;text-decoration:line-through}
+.tog.off::before{background:#C3CBD8}
+.rerun{margin-left:auto;font-family:var(--sans);font-size:11px;font-weight:600;padding:6px 13px;
+  border-radius:5px;border:1px solid var(--rule2);background:var(--l1);color:var(--ink);cursor:pointer}
+.rerun:hover{border-color:var(--mut);background:var(--l2)}
+.ci-row.skip{opacity:.45}
+.ci-ic.skip{border:1.5px dashed var(--rule2)}
+.ci-ic.skip::after{content:'';width:8px;height:1.5px;background:var(--rule2)}
+.conseq{padding:13px 15px;background:rgba(155,55,32,.06);border-top:1px solid rgba(155,55,32,.2)}
+.conseq h5{margin:0 0 7px;font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--fail);font-variation-settings:'wdth' 112}
+.conseq p{margin:0 0 7px;font-size:12.5px;line-height:1.55;color:var(--ink)}
+.conseq p:last-child{margin-bottom:0}
+.conseq b{color:var(--fail);font-family:var(--mono);font-size:11.5px;font-weight:700}
+.ci-clock{font-family:var(--mono);font-size:10px;color:var(--mut);margin-left:auto}
+
+/* ═══════════ TIME MACHINE ═══════════ */
+.tm-bar{display:flex;gap:9px;padding:13px 15px;background:var(--l2);border-bottom:1px solid var(--rule);
+  align-items:center;flex-wrap:wrap}
+.tm{font-family:var(--mono);font-size:11px;padding:7px 13px;border-radius:5px;cursor:pointer;
+  border:1px solid var(--rule2);background:var(--l1);color:var(--ink);transition:all .15s}
+.tm:hover{border-color:var(--trunk)}
+.tm.on{background:var(--trunk);border-color:var(--trunk);color:#fff}
+
+/* ═══════════ COUNTERFACTUAL ═══════════ */
+.cf{border:1px solid rgba(155,55,32,.28);border-radius:7px;background:rgba(155,55,32,.045);overflow:hidden}
+.cf-t{width:100%;display:flex;align-items:center;gap:11px;padding:13px 16px;background:none;border:0;
+  cursor:pointer;font-family:var(--sans);font-size:13px;font-weight:700;color:var(--fail);text-align:left}
+.cf-t svg{width:15px;height:15px;flex:0 0 15px}
+.cf-t .car{margin-left:auto;font-size:11px;transition:transform .22s;color:var(--fail);opacity:.7}
+.cf.open .cf-t .car{transform:rotate(90deg)}
+.cf-b{display:none;padding:0 16px 15px 42px;font-size:12.5px;line-height:1.62;color:var(--ink)}
+.cf.open .cf-b{display:block}
+.cf-b b{color:var(--fail)}
+.cf-b .q{font-family:var(--mono);font-size:11.5px;color:var(--mut);display:block;margin-top:9px}
+
+/* ═══════════ SHORTCUTS ═══════════ */
+#keys{position:fixed;inset:0;z-index:50;background:rgba(8,12,18,.82);display:none;
+  align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+#keys.open{display:flex}
+.keys-c{background:var(--d1);border:1px solid var(--d3);border-radius:10px;padding:28px 32px;min-width:390px}
+.keys-c h3{margin:0 0 20px;font-size:15px;color:var(--dtx);font-weight:700}
+.keys-r{display:flex;align-items:center;gap:16px;padding:8px 0;font-size:13px;color:var(--dmut)}
+.keys-r .kb{font-family:var(--mono);font-size:11px;color:var(--dtx);border:1px solid var(--d3);
+  border-radius:4px;padding:3px 9px;min-width:34px;text-align:center}
+
+@media(max-width:1000px){
+  body{overflow:auto}
+  .main{grid-template-columns:1fr}
+  .rail{border-bottom:1px solid var(--d3)}
+  .narr{grid-template-columns:1fr;gap:16px}
+  .top{flex-wrap:wrap;height:auto;padding:12px 18px;gap:10px 14px}
+  .prog{order:9;flex-basis:100%;padding:0}
+  .stage{padding:22px}
+  .cover-in{grid-template-columns:1fr;gap:34px}
+  .cover-art{display:none}
+  .cover-in h1{font-size:36px}
+  .res-bar{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ COVER ═══════════ -->
+<div id="cover">
+  <div class="cover-in">
+    <div>
+      <div class="eyebrow">Intercept · take-home case · live walkthrough</div>
+      <h1>How a client number<br>gets <em>built</em>.</h1>
+      <p class="lede">Two analysts, one lost customers model, and every step between a branch and
+        the spreadsheet that lands on the client's desk, including the merge conflict, and the
+        check that catches what the conflict broke.
+        <b>Ten steps. Drive it with the arrow keys.</b></p>
+      <div class="cover-cta">
+        <button class="btn solid" id="start" style="padding:11px 22px;font-size:13px">Start the walkthrough</button>
+        <span class="kbd">← →</span>
+      </div>
+    </div>
+    <div class="cover-art" id="coverArt"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HEADER ═══════════ -->
+<header class="top">
+  <div class="brand">INTERCEPT <span>/ client-report</span></div>
+  <div class="shield" title="Branch protection is on from day one">
+    <svg width="10" height="12" viewBox="0 0 11 13" aria-hidden="true"><path d="M5.5.7 10 2.4v4c0 3-1.9 5.2-4.5 5.9C2.9 11.6 1 9.4 1 6.4v-4z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+    <span><b>main</b> protected</span>
+  </div>
+  <nav class="prog" id="prog" aria-label="Walkthrough steps"></nav>
+  <div class="counter" id="counter"><b>01</b> / 10</div>
+  <button class="btn ghost" id="keysBtn" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+  <button class="btn ghost" id="notesBtn" aria-pressed="false">Notes</button>
+  <div class="nav">
+    <button class="btn" id="prev" aria-label="Previous step">←</button>
+    <button class="btn solid" id="next" aria-label="Next step">Next →</button>
+  </div>
+</header>
+
+<div class="main">
+  <aside class="rail">
+    <h2>Commit graph</h2>
+    <div class="sub">github.com/intercept/client-report &nbsp;·&nbsp; click any commit</div>
+    <div class="graph" id="graph"></div>
+    <div class="legend">
+      <div><span class="sw" style="background:#77A4DE"></span> main, protected, always deliverable</div>
+      <div><span class="sw" style="background:#E2A64C"></span> short-lived branch, target under 2 days</div>
+      <div><span class="sw" style="background:none;border:2px solid #E0745A"></span> checks failing, merge blocked</div>
+      <div style="margin-top:3px;color:#5B6B82;font-size:10px;font-family:var(--mono)">press ? for shortcuts</div>
+    </div>
+  </aside>
+
+  <div class="stagewrap">
+    <main class="stage" id="stage" tabindex="-1"></main>
+  </div>
+</div>
+
+<footer class="narr">
+  <div class="blk"><h3>What just happened</h3><p id="what"></p></div>
+  <div class="blk why"><h3>Why this step exists</h3><p id="why"></p></div>
+  <div class="pnotes off" id="pnotes"></div>
+</footer>
+
+<aside id="insp" aria-hidden="true" aria-label="Commit inspector">
+  <div class="insp-h"><span class="eyebrow">Commit</span>
+    <button class="insp-x" id="inspX" aria-label="Close inspector">&times;</button></div>
+  <div class="insp-b" id="inspB"></div>
+</aside>
+
+<div id="keys" role="dialog" aria-label="Keyboard shortcuts">
+  <div class="keys-c">
+    <h3>Driving the walkthrough</h3>
+    <div class="keys-r"><span class="kb">&larr; &rarr;</span><span>Step back and forward</span></div>
+    <div class="keys-r"><span class="kb">1 &ndash; 9</span><span>Jump straight to a step</span></div>
+    <div class="keys-r"><span class="kb">click</span><span>Any commit in the graph, to inspect it</span></div>
+    <div class="keys-r"><span class="kb">R</span><span>Re-run the checks</span></div>
+    <div class="keys-r"><span class="kb">N</span><span>Toggle presenter notes</span></div>
+    <div class="keys-r"><span class="kb">?</span><span>This panel</span></div>
+    <div class="keys-r"><span class="kb">Esc</span><span>Close anything open</span></div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   ICONS, inline so the page stays a single self-contained file
+   ══════════════════════════════════════════════════════════════ */
+const I = {
+  tick:'<svg viewBox="0 0 16 16" fill="none"><path d="M3.2 8.4l3.1 3.1 6.5-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  cross:'<svg viewBox="0 0 16 16" fill="none"><path d="M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  tickC:'<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.6"/><path d="M4.8 8.2l2.2 2.2 4.2-4.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  crossC:'<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.6"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  warnC:'<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.4v4.4M8 11.2v.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
+  lock:'<svg viewBox="0 0 16 16" fill="none"><rect x="3.2" y="7" width="9.6" height="6.6" rx="1.4" stroke="currentColor" stroke-width="1.5"/><path d="M5.6 7V5.2a2.4 2.4 0 014.8 0V7" stroke="currentColor" stroke-width="1.5"/></svg>',
+  no:'<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.5"/><path d="M3.6 12.4L12.4 3.6" stroke="currentColor" stroke-width="1.5"/></svg>',
+  // one per CI layer, so the check list reads at a glance
+  shield:'<svg viewBox="0 0 16 16" fill="none"><path d="M8 1.6l5.2 2v4.6c0 3.5-2.2 6-5.2 6.8-3-.8-5.2-3.3-5.2-6.8V3.6z" stroke="currentColor" stroke-width="1.4"/></svg>',
+  flask:'<svg viewBox="0 0 16 16" fill="none"><path d="M6.4 1.8v4.4L2.9 12a1.5 1.5 0 001.3 2.3h7.6A1.5 1.5 0 0013.1 12L9.6 6.2V1.8" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.4 1.8h5.2M4.6 9.6h6.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  table:'<svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2.8" width="12" height="10.4" rx="1.3" stroke="currentColor" stroke-width="1.4"/><path d="M2 6.4h12M6.6 6.4v6.8" stroke="currentColor" stroke-width="1.4"/></svg>',
+  gauge:'<svg viewBox="0 0 16 16" fill="none"><path d="M2.2 11.4a6.4 6.4 0 1111.6 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 11.4l3-3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  alert:'<svg viewBox="0 0 16 16" fill="none"><path d="M8 1.9l6.4 11.1H1.6z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.4v3M8 11.4v.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  clock:'<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.6" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.4V8l2.4 1.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  repeat:'<svg viewBox="0 0 16 16" fill="none"><path d="M3 7a5 5 0 018.6-3.4M13 9a5 5 0 01-8.6 3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11.8 1.4v2.6H9.2M4.2 14.6V12h2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
+
+/* ══════════════════════════════════════════════════════════════
+   COMMIT GRAPH, every node is a real commit in the story.
+   lane 0 = main · lane 1 = Alex's branch · lane 2 = Sam's branch
+   ══════════════════════════════════════════════════════════════ */
+const LANE_X = [46, 94, 138], ROW_Y = r => 30 + r * 64, R = 6.5;
+
+const NODES = [
+  {id:'c1',  row:0, lane:0, sha:'a3f21e0', msg:'scaffold repo + CI',    step:0},
+  {id:'c2',  row:1, lane:0, sha:'7c9d144', msg:'add customer features',    step:0},
+  {id:'c3',  row:2, lane:0, sha:'2b81f05', msg:'Q2 deliverable → the client', step:0, tag:'report/2026-q2'},
+  {id:'d1',  row:3, lane:1, sha:'9e4c7a2', msg:'waiting period → 60d',    step:2, branch:'alex/wait-60-days'},
+  {id:'ma1', row:4, lane:2, sha:'6ff2b90', msg:'guard missing account age',     step:6, branch:'sam/account-age'},
+  {id:'d2',  row:5, lane:1, sha:'4d70b18', msg:'move window to config', step:5},
+  {id:'m1',  row:6, lane:0, sha:'e8b0c31', msg:'merge #41 · Sam',     step:6},
+  {id:'d3',  row:7, lane:1, sha:'c15e8f3', msg:'merge main, resolve',   step:7},
+  {id:'m2',  row:8, lane:0, sha:'b7a2d09', msg:'merge #42 · Alex',       step:9, tag:'report/2026-q3'}
+];
+
+const EDGES = [
+  {a:'c1', b:'c2',  step:0}, {a:'c2', b:'c3',  step:0},
+  {a:'c3', b:'d1',  step:2},                       // Alex branches off
+  {a:'d1', b:'d2',  step:5},
+  {a:'c3', b:'ma1', step:6},                       // Sam branched off the same commit
+  {a:'ma1',b:'m1',  step:6}, {a:'c3', b:'m1', step:6},
+  {a:'d2', b:'d3',  step:7},
+  {a:'m1', b:'d3',  step:7},                       // merge main INTO the branch, the conflict
+  {a:'d3', b:'m2',  step:9}, {a:'m1', b:'m2', step:9}
+];
+
+/* Everything the inspector shows when a node is clicked. The "why" field is the
+   one that matters, it is the question the room will actually ask. */
+const DETAIL = {
+  c1: {who:'Sam', files:'6 files  ·  +214 −0', ck:'ok',
+    why:'The repository was scaffolded with CI already wired. Checks exist before the first analysis, not after the first incident. Retrofitting them onto work in flight is how teams end up never doing it.'},
+  c2: {who:'Sam', files:'src/features.py  ·  +38 −0', ck:'ok',
+    why:'The original 30-day lost customers definition. This is the code Q2’s numbers actually came from, which is why the tag one commit later matters.'},
+  c3: {who:'Sam', files:'2 files  ·  +19 −4', ck:'ok',
+    why:'The commit behind the Q2 deliverable. Tagged, so it can be checked out and rebuilt exactly. This is the commit you would return to if the client queried an August invoice in November.'},
+  d1: {who:'Alex', files:'src/features.py  ·  +1 −1', ck:'ok',
+    why:'One line, one question. It also carries the hard-coded 60 that Sam catches in review. It runs perfectly and is quietly wrong, which is the class of bug analytics review exists for.'},
+  d2: {who:'Alex', files:'3 files  ·  +11 −2', ck:'ok',
+    why:'The fix that came out of review. The window moves into config, so Q2 can still be rebuilt with 30 days from the same code. Reproducibility of a past deliverable was the blocking concern.'},
+  ma1:{who:'Sam', files:'src/features.py  ·  +1 −0', ck:'ok',
+    why:'Parallel work on the same function, branched from the same commit as Alex’s. This is what makes the conflict inevitable rather than unlucky. Two analysts on one small codebase will collide.'},
+  m1: {who:'Sam', files:'merge  ·  #41', ck:'ok',
+    why:'Sam’s pull request merges first. Alex’s branch is now behind, and branch protection will not let him ignore that. It is how the conflict surfaces inside the PR rather than after it.'},
+  d3: {who:'Alex', files:'src/features.py  ·  conflict resolved', ck:'?',
+    why:'Merging main into the branch and resolving by hand. Which resolution you pick decides whether the next CI run is green, green-but-worthless, or red.'},
+  m2: {who:'Alex', files:'merge and tidy  ·  #42', ck:'ok',
+    why:'Merge and tidy, so main gets one commit per pull request. Main’s history then reads as a list of answered questions rather than a log of everyone’s working-out.'}
+};
+
+const N = Object.fromEntries(NODES.map(n => [n.id, n]));
+const laneCol = l => l === 0 ? '#77A4DE' : '#E2A64C';
+
+function buildGraph(host, w = 160, scale = 1){
+  const h = ROW_Y(NODES.length - 1) + 34;
+  let paths = '', halos = '', circles = '';
+
+  EDGES.forEach(e => {
+    const a = N[e.a], b = N[e.b];
+    const x1 = LANE_X[a.lane], y1 = ROW_Y(a.row), x2 = LANE_X[b.lane], y2 = ROW_Y(b.row);
+    // straight within a lane; an eased S-curve when the lane changes
+    const d = a.lane === b.lane ? `M${x1} ${y1} L${x2} ${y2}`
+      : `M${x1} ${y1} C${x1} ${y1+26} ${x2} ${y2-26} ${x2} ${y2}`;
+    const toMain = b.lane === 0;
+    const col = laneCol(toMain ? 0 : Math.max(a.lane, b.lane));
+    // main is drawn heavier than a feature branch, the trunk should read as the trunk
+    paths += `<path class="gpath" data-step="${e.step}" d="${d}" stroke="${col}"
+      stroke-width="${toMain && a.lane === 0 ? 2.6 : 2}" opacity="${toMain && a.lane===0 ? 1 : .82}"/>`;
+  });
+
+  NODES.forEach(n => {
+    const c = laneCol(n.lane), x = LANE_X[n.lane], y = ROW_Y(n.row);
+    halos  += `<circle class="ghalo" data-step="${n.step}" data-halo="${n.id}" cx="${x}" cy="${y}" r="${R+7}" fill="${c}" opacity="0"/>`;
+    circles += `<circle class="gpulse" data-pulse="${n.id}" cx="${x}" cy="${y}" r="9"/>`;
+    circles += `<circle class="gnode" data-step="${n.step}" data-node="${n.id}" cx="${x}" cy="${y}" r="${R}" fill="${c}"/>`;
+    circles += `<circle class="gring" data-ring="${n.id}" cx="${x}" cy="${y}" r="${R+5.5}" stroke="#E0745A" opacity="0"/>`;
+  });
+
+  host.innerHTML = `<svg width="${w}" height="${h}" role="img"
+      aria-label="Commit graph: a protected main branch with two short-lived feature branches merging back">
+      ${halos}${paths}${circles}</svg>` +
+    NODES.map(n => `<div class="glabel hid" data-step="${n.step}" data-label="${n.id}"
+        style="top:${ROW_Y(n.row) - (n.branch ? 23 : 13)}px">
+        ${n.branch ? `<div class="bname">${n.branch}</div>` : ''}
+        <div class="sha">${n.sha}</div><div class="msg">${n.msg}</div>
+        ${n.tag ? `<div class="tag"><b>TAG</b> ${n.tag}</div>` : ''}
+      </div>`).join('');
+
+  host.querySelectorAll('.gpath').forEach(p => {
+    const len = p.getTotalLength();
+    p.style.strokeDasharray = len; p.style.strokeDashoffset = len;
+    p.style.transition = 'stroke-dashoffset .62s cubic-bezier(.3,.8,.3,1)';
+  });
+  host.querySelectorAll('.gnode').forEach(c => {
+    c.style.transformOrigin = `${c.getAttribute('cx')}px ${c.getAttribute('cy')}px`;
+    c.style.transition = 'transform .38s cubic-bezier(.2,1.5,.4,1), opacity .3s';
+  });
+  if (host.id !== 'graph') return;                    // the cover copy stays inert
+  host.querySelectorAll('.gnode').forEach(c =>
+    c.addEventListener('click', () => inspect(c.dataset.node)));
+  host.querySelectorAll('.glabel').forEach(l =>
+    l.addEventListener('click', () => inspect(l.dataset.label)));
+}
+
+/* the newest commit at each step gets a pulsing halo, so the eye knows where to look */
+const NEWEST = {0:'c3',1:'c3',2:'d1',3:'d1',4:'d1',5:'d2',6:'m1',7:'d3',8:'d3',9:'m2'};
+
+function syncGraph(step){
+  // the final merge only exists if protection actually let it happen
+  const blocked = resolution === 'ours';
+  const on = s => s <= step && !(blocked && s === 9);
+  const cur = blocked && step === 9 ? 'd3' : NEWEST[step];
+
+  document.querySelectorAll('.gpath').forEach(p =>
+    p.style.strokeDashoffset = on(+p.dataset.step) ? 0 : p.getTotalLength());
+  document.querySelectorAll('.gnode').forEach(c => {
+    const v = on(+c.dataset.step);
+    c.style.transform = v ? 'scale(1)' : 'scale(0)'; c.style.opacity = v ? 1 : 0;
+  });
+  document.querySelectorAll('.ghalo').forEach(hl =>
+    hl.setAttribute('opacity', on(+hl.dataset.step) && hl.dataset.halo === cur ? .19 : 0));
+  document.querySelectorAll('.gpulse').forEach(p =>
+    p.classList.toggle('on', on(N[p.dataset.pulse].step) && p.dataset.pulse === cur));
+  document.querySelectorAll('.glabel').forEach(l => {
+    l.classList.toggle('hid', !on(+l.dataset.step));
+    l.classList.toggle('cur', l.dataset.label === cur);
+  });
+}
+/* ── the inspector: click a commit, get the answer to "why is that there?" ── */
+let selected = null;
+function inspect(id){
+  const n = N[id], d = DETAIL[id];
+  if (!n || !d) return;
+  // d3's check state depends on how the conflict was resolved
+  const ck = id === 'd3'
+    ? (resolution === 'ours' ? 'bad' : resolution ? 'ok' : '?')
+    : d.ck;
+  const ckLabel = ck === 'ok' ? 'checks passing' : ck === 'bad' ? '1 check failing' : 'not yet run';
+  selected = id;
+  $('inspB').innerHTML = `
+    <div class="insp-sha">${n.sha}</div>
+    <p class="insp-msg">${n.msg}</p>
+    <div style="margin:14px 0 4px;display:flex;gap:7px;flex-wrap:wrap">
+      <span class="chip ${ck === '?' ? '' : ck}">${ck === 'ok' ? '&#10003;' : ck === 'bad' ? '&times;' : '&middot;'} ${ckLabel}</span>
+      ${n.tag ? `<span class="chip tag">TAG ${n.tag}</span>` : ''}
+    </div>
+    <div class="insp-row"><span class="k">author</span><span class="v">${d.who}</span></div>
+    <div class="insp-row"><span class="k">branch</span><span class="v mono">${n.branch || (n.lane === 0 ? 'main' : ', ')}</span></div>
+    <div class="insp-row"><span class="k">changed</span><span class="v mono">${d.files}</span></div>
+    <div class="insp-row"><span class="k">step</span><span class="v">appears at step ${n.step + 1}, ${STEPS[n.step].nav}</span></div>
+    <div class="insp-why"><h4>Why this commit is in the demo</h4><p>${d.why}</p></div>`;
+  $('insp').classList.add('open'); $('insp').setAttribute('aria-hidden','false');
+  document.querySelectorAll('.glabel').forEach(l => l.classList.toggle('sel', l.dataset.label === id));
+}
+function closeInsp(){
+  selected = null; $('insp').classList.remove('open'); $('insp').setAttribute('aria-hidden','true');
+  document.querySelectorAll('.glabel').forEach(l => l.classList.remove('sel'));
+}
+
+const ringNode = (id, on) => {
+  const r = document.querySelector(`[data-ring="${id}"]`);
+  if (r) r.setAttribute('opacity', on ? 1 : 0);
+};
+
+/* ══════════════════════════════════════════════════════════════
+   BUILDERS, each renders one thing you would actually see on GitHub
+   ══════════════════════════════════════════════════════════════ */
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+const card = (title, file, body, flush, hero) =>
+  `<div class="card ${hero ? 'hero' : ''}"><div class="card-h"><span class="t">${title}</span>
+   ${file ? `<span class="f">${file}</span>` : ''}</div>
+   <div class="card-b ${flush ? 'flush' : ''}">${body}</div></div>`;
+
+const term = lines => `<div class="term">` + lines.map(l => {
+  if (l === '') return '<div>&nbsp;</div>';
+  const [k, t] = Array.isArray(l) ? l : ['out', l];
+  return `<div class="${k}">${esc(t)}</div>`;
+}).join('') + `</div>`;
+
+/* rows: ['ctx'|'add'|'del'|'hunk'|'mk-o'|'mk-t'|'mk-s', text, sideClass?] */
+const diff = (rows, startLine) => {
+  let ln = startLine || 0;
+  return `<div class="diff">` + rows.map(([k, t, side]) => {
+    if (k === 'hunk') return `<div class="hunk">${esc(t)}</div>`;
+    if (k.startsWith('mk-')) {
+      const label = k === 'mk-o' ? 'YOURS' : k === 'mk-t' ? 'THEIRS' : '';
+      return `<div class="mk ${k}">${esc(t)}${label ? `<span class="tagx">${label}</span>` : ''}</div>`;
+    }
+    const g = k === 'add' ? '+' : k === 'del' ? '−' : '';
+    const num = ln ? (k === 'del' ? '' : ln++) : '';
+    return `<div class="row ${k} ${side || ''}"><span class="n">${num}</span>
+      <span class="g">${g}</span><span class="c">${esc(t)}</span></div>`;
+  }).join('') + `</div>`;
+};
+
+/* The Drive counterfactual, collapsed by default. This is the answer to
+   "why bother?" at the exact moment it is most persuasive. */
+const cf = (head, body) => `<div class="cf">
+  <button class="cf-t">${I.alert}<span>${head}</span><span class="car">&#9656;</span></button>
+  <div class="cf-b">${body}</div></div>`;
+
+const comment = (who, initials, loc, kind, label, code, body) => `
+  <div class="cm">
+    <div class="cm-h"><span class="av ${who === 'Alex' ? 'b' : ''}">${initials}</span>
+      <span class="cm-a">${who}</span><span class="kind ${kind}">${label}</span>
+      <span class="cm-l">${loc}</span></div>
+    ${code ? `<pre class="cm-code">${esc(code)}</pre>` : ''}
+    <div class="cm-b">${body}</div>
+  </div>`;
+
+/* ── CI runner: reveals a check at a time, then resolves it ── */
+let ciToken = 0;
+const OFF = new Set();                     // checks the presenter has switched off
+
+function runCI(host, checks, clockEl){
+  const my = ++ciToken;
+  const slow = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const live = checks.filter(c => !OFF.has(c.name));
+  host.innerHTML = `<div class="ci-bar"><i id="ciBar"></i></div>` + checks.map((c, i) => {
+    const off = OFF.has(c.name);
+    return `<div class="ci-row ${off ? 'skip in' : ''}" data-i="${i}">
+      <span class="ci-ic ${off ? 'skip' : 'run'}"></span>
+      <span class="ci-n">${I[c.icon]}${c.name}</span>
+      <span class="ci-d">${off ? 'switched off, not run' : c.detail}</span>
+      <span class="ci-t">${off ? ', ' : c.time}</span>
+    </div>`;
+  }).join('') + `<div class="ci-sum" id="ciSum"></div><div id="ciCon"></div>`;
+
+  const rows = [...host.querySelectorAll('.ci-row')];
+  const sum = host.querySelector('#ciSum'), bar = host.querySelector('#ciBar');
+  const failed = live.filter(c => c.fail);
+
+  /* the consequence of every check that is currently switched off */
+  const con = host.querySelector('#ciCon');
+  if (OFF.size) con.innerHTML = `<div class="conseq"><h5>What gets through</h5>` +
+    [...OFF].map(name => `<p><b>${name} off</b>, ${CONSEQ[name]}</p>`).join('') + `</div>`;
+
+  let done = 0;
+  const settle = i => {
+    if (my !== ciToken) return;
+    const c = checks[i];
+    if (OFF.has(c.name)) return;
+    const ic = rows[i].querySelector('.ci-ic');
+    ic.className = 'ci-ic ' + (c.fail ? 'bad' : 'ok');
+    ic.innerHTML = c.fail ? I.cross : I.tick;
+    if (c.fail) rows[i].querySelector('.ci-d').style.color = 'var(--fail)';
+    bar.style.right = (100 - (++done / live.length) * 100) + '%';
+    if (done === live.length){
+      if (clockEl) clockEl.dataset.stop = '1';
+      sum.className = 'ci-sum ' + (failed.length ? 'bad' : 'ok');
+      sum.innerHTML = (failed.length ? I.crossC : I.tickC) + (failed.length
+        ? `<span>${failed.length} check failing, merge blocked by branch protection</span>`
+        : `<span>All ${live.length} check${live.length === 1 ? '' : 's'} passed, this pull request can merge</span>`);
+    }
+  };
+
+  let n = 0;
+  rows.forEach((r, i) => {
+    if (OFF.has(checks[i].name)) return;
+    const k = n++;
+    const show = () => { if (my === ciToken) r.classList.add('in'); };
+    if (slow){ setTimeout(show, k * 175); setTimeout(() => settle(i), k * 175 + 660); }
+    else { show(); settle(i); }
+  });
+  if (!live.length){
+    sum.className = 'ci-sum bad';
+    sum.innerHTML = I.warnC + '<span>Every check is switched off. Nothing is verifying anything.</span>';
+  }
+
+  /* a running clock, so the wait feels like a real pipeline rather than a slideshow */
+  if (clockEl && slow){
+    clockEl.dataset.stop = ''; let t = 0;
+    const tick = () => {
+      if (my !== ciToken || clockEl.dataset.stop) return;
+      t += 1; clockEl.textContent = `${String(Math.floor(t / 60)).padStart(2,'0')}:${String(t % 60).padStart(2,'0')} elapsed`;
+      setTimeout(tick, 110);
+    };
+    clockEl.textContent = '00:00 elapsed'; setTimeout(tick, 110);
+  }
+}
+
+/* Why each check exists, expressed as what reaches the client without it.
+   This is the answer to "do we really need all five?" */
+const CONSEQ = {
+  'hygiene': 'a credential pasted into a notebook output is committed to the repository. Rotating it is the only fix, you cannot delete it from history.',
+  'tests': 'the join that duplicates rows ships. the client’s lost customers count is inflated, the number looks plausible, and nobody can say why it moved.',
+  'data contract': 'the client renames a column in the client’s system. The pipeline runs happily, the feature is silently all-null, and the model degrades without a single error.',
+  'score check': 'score drops from 0.84 to 0.71 and nothing objects. You find out when the client’s own numbers disagree with yours.',
+  'reproducibility': 'a seed drifts. November’s rebuild of August’s deliverable comes out different, and you have no way to explain the gap.'
+};
+
+/* ══════════════════════════════════════════════════════════════
+   THE CHECKS, five layers, cheapest first, so cheap things fail fast
+   ══════════════════════════════════════════════════════════════ */
+const CHECKS = (o = {}) => [
+  {icon:'shield', name:'hygiene',        detail:'ruff · nbstripout · gitleaks · file size', time:'9s'},
+  {icon:'flask',  name:'tests',          detail: o.testFail ? 'pytest, 1 failed, 13 passed' : 'pytest, 14 passed',
+                                         time:'1m 04s', fail: !!o.testFail},
+  {icon:'table',  name:'data contract',  detail:'pandera shape of the data on committed sample file', time:'41s'},
+  {icon:'gauge',  name:'score check',     detail: o.gate || 'score 0.84 vs baseline 0.81 (tol −0.02)', time:'6m 12s'},
+  {icon:'repeat', name:'reproducibility',detail:'output hash stable across two runs', time:'58s'}
+];
+
+/* The two tagged deliverables. Switching between them is the thesis demonstrated
+   rather than asserted: same repository, two commits, two exactly reproducible answers. */
+const TAGS = {
+  q3:{tag:'report/2026-q3', sha:'b7a2d09', file:'q3_customer_report.xlsx',
+      data:'storage/client/2026-06-01/', env:'uv.lock \u00b7 sha256:4f1c9e\u2026',
+      waited:'60 days  (config/settings.yml)', lost:'5.3%', score:'0.84',
+      note:'The deliverable the client received in August. Five things recorded \u2014 miss any one and it does not rebuild.'},
+  q2:{tag:'report/2026-q2', sha:'2b81f05', file:'q2_customer_report.xlsx',
+      data:'storage/client/2026-03-01/', env:'uv.lock \u00b7 sha256:9b34c1\u2026',
+      waited:'30 days  (config/settings.yml)', lost:'4.1%', score:'0.81',
+      note:'Three months old, and it rebuilds byte for byte. This is the question in the brief \u2014 \u201clast month\u2019s numbers cannot be rebuilt\u201d \u2014 answered.'}
+};
+
+/* conflict resolution state, drives steps 8 and 9 */
+let resolution = null;
+
+const RESOLVED = {
+  ours: [
+    ['ctx','def find_lost_customers(df, quiet_days=QUIET_DAYS):'],
+    ['ctx','    """Label an account as lost if inactive for quiet_days."""'],
+    ['ctx','    cutoff = df.snapshot_date - days(quiet_days)'],
+    ['ctx','    return (df.last_active < cutoff).astype(int)']
+  ],
+  theirs: [
+    ['ctx','def find_lost_customers(df, quiet_days=QUIET_DAYS):'],
+    ['ctx','    """Label an account as lost if inactive for quiet_days."""'],
+    ['ctx','    df = df[df.account_age.notna()]'],
+    ['ctx','    cutoff = df.snapshot_date - days(30)'],
+    ['ctx','    return (df.last_active < cutoff).astype(int)']
+  ],
+  combine: [
+    ['ctx','def find_lost_customers(df, quiet_days=QUIET_DAYS):'],
+    ['ctx','    """Label an account as lost if inactive for quiet_days."""'],
+    ['add','    df = df[df.account_age.notna()]'],
+    ['add','    cutoff = df.snapshot_date - days(quiet_days)'],
+    ['ctx','    return (df.last_active < cutoff).astype(int)']
+  ]
+};
+
+const VERDICT = {
+  ours:   {cls:'bad', ic:'crossC', head:'Loses Sam’s missing-value check',
+    body:'The 60-day window survives, but customers with a null <code>account age</code> are back in the frame. <b>The test suite catches this on the next run</b>, which is exactly why that test exists.'},
+  theirs: {cls:'mid', ic:'warnC', head:'Loses the change this pull request was for',
+    body:'The missing-value check survives and the window silently reverts to 30 days. Every check will pass. <b>CI cannot tell you that a green pipeline delivered nothing</b>, that judgement is the reviewer’s.'},
+  combine:{cls:'ok', ic:'tickC', head:'Both intents preserved',
+    body:'Sam’s missing-value check and Alex’s adjustable window are independent edits to the same region. A conflict is not a contest. The usual right answer is <b>both</b>.'}
+};
+
+/* ══════════════════════════════════════════════════════════════
+   THE TEN STEPS
+   ══════════════════════════════════════════════════════════════ */
+const STEPS = [
+{
+  nav:'Start', eyebrow:'Starting point', title:'main is protected, and Q2 is tagged',
+  build: () => `<div class="grid two">
+    ${card('Recent history','git log --oneline -3', term([
+      ['out','2b81f05  Q2 deliverable → the client    (tag: report/2026-q2)'],
+      ['out','7c9d144  add customer features'],
+      ['out','a3f21e0  scaffold repo + CI']
+    ]), true)}
+    ${card('Branch protection on main','settings', `<ul class="rules">
+      <li>${I.lock}<span>No direct pushes, every change arrives as a pull request</span></li>
+      <li>${I.lock}<span>One approving review required</span></li>
+      <li>${I.lock}<span>All five status checks must pass</span></li>
+      <li>${I.lock}<span>Branch must be up to date with main before merging</span></li>
+    </ul>`, true)}
+    <div class="span">${card('Repository layout','the two lanes', `<div class="tree">
+      <span class="p"><b>src/</b></span><span class="a">reviewed, tested, produces client numbers</span>
+      <span class="p">  features.py</span><span class="a">the transformation functions</span>
+      <span class="p">  models/  contracts/</span><span class="a">training code · pandera shape of the data</span>
+      <span class="p"><b>tests/</b></span><span class="a">what CI runs on every pull request</span>
+      <span class="p"><b>config/</b>client.yml</span><span class="a">every parameter lives here, never in a cell</span>
+      <span class="p"><b>data/</b>sample files/</span><span class="a">small and anonymised, the real data never lands here</span>
+      <span class="p"><i>exploration/</i></span><span class="a">no review, no checks, never ships</span>
+      <span class="p"><b>.github/</b>workflows/ci.yml</span><span class="a">the five checks</span>
+    </div>
+    <p class="note" style="margin-top:14px"><b>Two lanes, not one.</b> Anything in <span style="font-family:var(--mono);color:var(--work)">exploration/</span> requires none of this workflow. The full path applies to anything touching <span style="font-family:var(--mono)">src/</span> or producing a client number, otherwise mandatory review on throwaway work is pure tax.</p>`,
+    false, false)}
+  </div>`,
+  what:'The repository has three commits on main and a tag, report/2026-q2, marking the exact commit that produced the numbers the client received in Q2.',
+  why:'The tag is the answer to “rebuild last month’s numbers.” Branches are temporary and get deleted; tags are the permanent record of what left the building. Protection is on from day one, because without it everything that follows is only a suggestion.',
+  notes:'<b>If asked why not GitFlow:</b> GitFlow exists so you can patch version 1.4 while 2.0 is in development. Intercept has no supported versions, it has deliverables. <code>develop</code> and <code>release/*</code> buy isolation we do not need. <b>If asked about the fourth rule:</b> “must be up to date” is what forces the merge conflict in step 8 to surface inside the pull request rather than after the merge.'
+},
+{
+  nav:'Branch', eyebrow:'Step 1 · Branch', title:'Alex opens a branch for one question',
+  build: () => `<div class="grid two">
+    ${card('Ticket','TICKET-118', `
+      <p class="big">Does a 60-day waiting period predict better than 30?</p>
+      <p class="note">the client flagged that their business customers often go quiet for six weeks and then come back. They want to know whether the current 30-day definition is over-counting lost customers.</p>`)}
+    ${card('Terminal','', term([
+      ['cmd','git switch main && git pull'],
+      ['out','Already up to date.'],
+      '',
+      ['cmd','git switch -c alex/wait-60-days'],
+      ['out',"Switched to a new branch 'alex/wait-60-days'"]
+    ]), true)}
+    <div class="span">${card('What Alex actually does','no terminal required', `
+      <p class="note" style="margin-bottom:14px"><b>Three of the five analysts have never used Git.</b> They do not learn these commands, they learn four actions in the VS Code sidebar, and the mental model of the graph comes later. Nobody needs <span style="font-family:var(--mono)">git rebase -i</span> to do their job.</p>
+      <div class="tree">
+        <span class="p"><b>1</b>  Create Branch…</span><span class="a">names it, switches to it, no copy made</span>
+        <span class="p"><b>2</b>  Stage &amp; Commit</span><span class="a">tick the files, type why, click ✓</span>
+        <span class="p"><b>3</b>  Publish Branch</span><span class="a">pushes it to GitHub</span>
+        <span class="p"><b>4</b>  Create Pull Request</span><span class="a">opens the template in the browser</span>
+      </div>
+      <p class="note" style="margin-top:14px">Merge conflicts escalate to a Git-comfortable analyst for the first month. A novice’s first conflict must not happen alone at 6pm before a client deadline, that single experience is what would send this back to Drive.</p>`)}</div>
+  </div>`,
+  what:'Alex, one of the three analysts who had never used Git, pulls main and creates a branch. A branch is just a movable pointer to a commit, so this costs nothing and copies nothing.',
+  why:'One branch per answerable question, named owner/what-it-does, aiming to live under two days. This is the only Git command in the workflow Alex needs to understand conceptually; the rest is a button in VS Code.',
+  notes:'<b>Why short-lived:</b> the DORA research found high performers keep branch lifetimes under a day and fewer than three branches open, independent of team size. <b>The analytics-specific reason:</b> a long branch accumulates the cost of working apart on two axes, because the data moves underneath you as well as the code.'
+},
+{
+  nav:'Commit', eyebrow:'Step 2 · Commit', title:'One line changes',
+  build: () => `<div class="grid">
+    ${card('Diff','src/features.py  ·  +1 −1', diff([
+      ['hunk','@@ -14,7 +14,7 @@  def find_lost_customers(df, quiet_days=30):'],
+      ['ctx','def find_lost_customers(df, quiet_days=30):'],
+      ['ctx','    """Label an account as lost if inactive for quiet_days."""'],
+      ['del','    cutoff = df.snapshot_date - days(30)'],
+      ['add','    cutoff = df.snapshot_date - days(60)'],
+      ['ctx','    return (df.last_active < cutoff).astype(int)']
+    ], 14), true, true)}
+    ${card('Terminal','', term([
+      ['cmd','git add src/features.py'],
+      ['cmd','git commit -m "Extend waiting period to 60 days"'],
+      ['out','[alex/wait-60-days 9e4c7a2] Extend waiting period to 60 days'],
+      ['out',' 1 file changed, 1 insertion(+), 1 deletion(-)'],
+      '',
+      ['cmd','git push -u origin alex/wait-60-days']
+    ]), true)}
+    <div class="span">${cf('Without version control, what happens instead',
+      `Alex copies the script and saves it beside the original:
+       <span class="q">features_v2_dev_60day.py</span>
+       Nothing records that this is an experiment rather than the new truth, and nothing records
+       what it was branched from. <b>Tomorrow Sam opens the folder and has to guess which file to edit.</b>
+       Within a month there are five of these, and the answer lives in someone’s head.`)}</div>
+  </div>`,
+  what:'A single line moves. Note the bug now sitting in the diff in plain sight: the function signature says quiet_days=30, but the body hard-codes 60 and ignores the argument.',
+  why:'One pull request should answer one question. Review quality falls off sharply past a few hundred changed lines. A 2,000 line pull request does not get reviewed, it gets approved. Small diffs are also why conflicts stay rare.',
+  notes:'<b>The hard-coded 60 is deliberate.</b> It is the kind of defect that runs perfectly and is quietly wrong, exactly the class of bug analytics review has to catch and that no linter will. Sam finds it in step 5.'
+},
+{
+  nav:'Pull request', eyebrow:'Step 3 · Pull request', title:'The proposal, in the author’s words',
+  build: () => `<div class="grid">
+    <div class="card hero">
+      <div class="pr-top">
+        <div class="pr-title">Extend waiting period to 60 days</div>
+        <div class="pr-meta"><span class="pill open">Open</span>
+          <span>#42</span><b>alex/wait-60-days</b>→<b>main</b>
+          <span>·</span><span>Alex</span><span>·</span><span>1 file, +1 −1</span></div>
+      </div>
+      <div class="prbody">
+        <h4>What changed and why</h4>
+        <p>Extends the waiting period from 30 to 60 days. Closes TICKET-118.</p>
+        <div class="flagged">
+          <h4>What number moved</h4>
+          <p class="num">Customers lost &nbsp;4.1% → <i>5.3%</i><br>How often right &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0.81 → <i>0.84</i></p>
+          <p class="note" style="margin-top:7px">Driver: waiting longer stops us counting business customers who go quiet and come back.</p>
+        </div>
+        <h4>How I checked it</h4>
+        <p>Ran it on the sample file, checked the row counts match the source, and went through the ten most at-risk customers by hand against the client’s own list.</p>
+        <h4>What I did not check</h4>
+        <p>I have not checked it against 2022. That data is stored differently and I did not want to guess.</p>
+      </div>
+    </div>
+  </div>`,
+  what:'The pull request template forces four sections. Two of them are what make this workflow fit analytics rather than software.',
+  why:'“What number moved” is the analytics-specific field, a software PR says “adds endpoint,” but an analytics PR has to say which client number changed and why. “What I did not check” is what builds review culture: a PR that admits its limits gets a better review than one projecting confidence.',
+  notes:'<b>The author self-reviews the diff before requesting review.</b> Roughly half of all review comments are things the author would have caught reading their own diff. <b>On size:</b> under ~400 changed lines, and one answerable question, the second constraint binds more often than the first.'
+},
+{
+  nav:'CI passes', eyebrow:'Step 4 · Continuous integration', title:'Five checks, cheapest first',
+  build: () => `<div class="grid">
+    <div class="card hero"><div class="card-h"><span class="t">Checks</span>
+      <span class="ci-clock" id="ciClock"></span>
+      <span class="f">.github/workflows/ci.yml</span></div>
+      <div class="tog-bar" id="togBar"><span class="lbl">Switch one off</span></div>
+      <div class="card-b flush" id="ciHost"></div></div>
+    ${card('Bot comment on the pull request','intercept-ci', `
+      <div class="cm-h"><span class="av">CI</span><span class="cm-a">intercept-ci</span>
+        <span class="kind ok">score check</span></div>
+      <div class="kv"><span class="k">score</span><span class="v hi">0.81 → 0.84 &nbsp;(+0.03)</span><br>
+      <span class="k">customers lost</span><span class="v hi">4.1% → 5.3% &nbsp;(+1.2pp)</span><br>
+      <span class="k">rows</span><span class="v">48,112 → 48,112 &nbsp;(unchanged)</span></div>`)}
+  </div>`,
+  after: () => {
+    const bar = $('togBar');
+    CHECKS().forEach(c => {
+      const b = document.createElement('button');
+      b.className = 'tog' + (OFF.has(c.name) ? ' off' : '');
+      b.textContent = c.name;
+      b.title = 'Switch this check off and see what reaches the client';
+      b.addEventListener('click', () => {
+        OFF.has(c.name) ? OFF.delete(c.name) : OFF.add(c.name);
+        render();
+      });
+      bar.appendChild(b);
+    });
+    const rr = document.createElement('button');
+    rr.className = 'rerun'; rr.textContent = 'Re-run checks';
+    rr.addEventListener('click', () => render());
+    bar.appendChild(rr);
+    runCI($('ciHost'), CHECKS(), $('ciClock'));
+  },
+  what:'Every check runs automatically on the pull request. They are ordered by cost, so a ten-second formatting failure never waits behind a six-minute model retrain.',
+  why:'Each layer maps to a specific way analytics goes wrong: hygiene catches leaked credentials and committed notebook outputs; tests catch joins that duplicate rows; the data contract catches the client’s system changing the data shape; the score check catches silent degradation; the reproducibility check catches an unrecorded seed.',
+  notes:'<b>The distinction to make if pushed:</b> we do not test that the model is good, that is a judgement call and belongs to the reviewer. We test that the pipeline does what it claims. “Does this join duplicate rows?” has a right answer and belongs to a machine. <b>On cost:</b> the score check is the expensive one; gate it to run only when files under <code>models/</code> change, or Actions minutes get painful.'
+},
+{
+  nav:'Review', eyebrow:'Step 5 · Review', title:'Sam reviews the change, not the formatting',
+  build: () => `<div class="grid">
+    ${card('Review · Sam','#42  ·  3 comments',
+      comment('Sam','M','src/features.py:17','block','blocking','    cutoff = df.snapshot_date - days(60)',
+        'The signature still says <code>quiet_days=30</code> and the body ignores it. If we hard-code 60 we can no longer rebuild the Q2 deliverable from this code. Move the window into <code>config/settings.yml</code> and pass it through.') +
+      comment('Sam','M','src/features.py:19','q','question','',
+        'Does a 60-day window pull the 2023 enterprise group of customers back into scope? Their account age field is recorded differently, worth confirming that is intentional rather than incidental.') +
+      comment('Sam','M','src/features.py:15','nit','nit','',
+        'Docstring says “quiet_days” but it is not really a parameter yet. Non-blocking, fold it into the fix above if convenient.'),
+    true, true)}
+    ${card('Alex responds','4d70b18', term([
+      ['out','Good catch, the Q2 rebuild is exactly the case I missed.'],
+      '',
+      ['cmd','git commit -m "Move waiting period to config"'],
+      ['out','[alex/wait-60-days 4d70b18] Move waiting period to config'],
+      ['out',' 3 files changed, 11 insertions(+), 2 deletions(-)'],
+      '',
+      ['good','✓ Sam approved these changes']
+    ]), true)}
+    <div class="span">${cf('Without version control, what happens instead',
+      `There is no moment at which a second person is required to look. Alex’s change is correct-looking
+       and runs without error, so it goes into the client deck. <b>The hard-coded 60 is found in November,
+       when someone tries to rebuild Q2 and gets the wrong number.</b>
+       Review is not a courtesy here, it is the only stage where a human checks that the code answers
+       the question the client actually asked.`)}</div>
+  </div>`,
+  what:'Three comments, each labelled with what it demands. One blocking defect, one question, one nit that is explicitly non-blocking. Alex pushes a fix and Sam approves.',
+  why:'Labelling removes any ambiguity about which comments must be addressed. That ambiguity is what makes review feel adversarial. Note what Sam did not comment on: spacing, quote style, line length. That is ruff’s job.',
+  notes:'<b>The blocking comment is the whole case for review in one sentence:</b> a hard-coded constant broke reproducibility of a past deliverable, and no automated check would have caught it. <b>Culture rules:</b> review within one business day, and ask rather than instruct, “what happens if account age is null here?” lands better than “add a null check.” A slow review is what sends people back to Drive.'
+},
+{
+  nav:'Sam merges', eyebrow:'Step 6 · Someone else merges first', title:'Sam’s change lands on main',
+  build: () => `<div class="grid two">
+    ${card('#41 · Guard against missing account age','merged', `
+      <div class="pr-meta" style="margin:0 0 12px"><span class="pill ok">Merged</span>
+        <b>sam/account-age</b>→<b>main</b></div>
+      ${diff([
+        ['hunk','@@ src/features.py'],
+        ['ctx','def find_lost_customers(df, quiet_days=30):'],
+        ['add','    df = df[df.account_age.notna()]'],
+        ['ctx','    cutoff = df.snapshot_date - days(30)']
+      ], 14)}`)}
+    ${card('Back on pull request #42','status', `
+      <div class="cm-h"><span class="av" style="background:var(--fail)">!</span>
+        <span class="cm-a">Branch protection</span><span class="kind block">blocked</span></div>
+      <p class="note" style="margin-bottom:11px"><b>This branch is out of date with the base branch.</b> Merge the latest changes from main into this branch before merging.</p>
+      <p class="note">Sam’s change touches the same function, three lines from Alex’s.</p>`)}
+  </div>`,
+  what:'Sam’s smaller pull request was reviewed and merged first. It edits the same function Alex is working in, dropping rows with a missing account age before the cutoff is calculated.',
+  why:'This is the “two people changed the same file” problem, and it is completely normal. The protection rule requiring the branch to be up to date is what surfaces it here, inside the pull request, instead of after the merge when it would already be on main.',
+  notes:'<b>If asked why not rebase:</b> either works. We merge rather than rebase because rebase rewrites commit hashes on a pushed branch, and for three analysts learning Git that is one confusing concept too many. The habit that matters is <b>pull main into your branch daily</b>, resolve small conflicts often rather than one big one late.'
+},
+{
+  nav:'Conflict', eyebrow:'Step 7 · Merge conflict', title:'Git refuses to guess, you decide',
+  build: () => `<div class="grid">
+    ${card('Terminal','', term([
+      ['cmd','git switch alex/wait-60-days'],
+      ['cmd','git merge main'],
+      ['out','Auto-merging src/features.py'],
+      ['warn','CONFLICT (content): Merge conflict in src/features.py'],
+      ['warn','Automatic merge failed; fix conflicts and then commit the result.']
+    ]), true)}
+    <div class="card hero">
+      <div class="card-h"><span class="dot" style="background:var(--fail)"></span>
+        <span class="t">Conflicted file</span><span class="f">src/features.py</span></div>
+      <div class="card-b flush">${diff([
+        ['ctx','def find_lost_customers(df, quiet_days=QUIET_DAYS):'],
+        ['ctx','    """Label an account as lost if inactive for quiet_days."""'],
+        ['mk-o','<<<<<<< HEAD  (alex/wait-60-days)'],
+        ['ctx','    cutoff = df.snapshot_date - days(quiet_days)','side-o'],
+        ['mk-s','======='],
+        ['ctx','    df = df[df.account_age.notna()]','side-t'],
+        ['ctx','    cutoff = df.snapshot_date - days(30)','side-t'],
+        ['mk-t','>>>>>>> main  (Sam: guard missing account age)'],
+        ['ctx','    return (df.last_active < cutoff).astype(int)']
+      ], 14)}</div>
+      <div class="res-bar">
+        <button class="res" data-r="ours"><b>Keep ours</b><span>Alex’s 60-day window only</span></button>
+        <button class="res" data-r="theirs"><b>Keep theirs</b><span>Sam’s missing-value check only</span></button>
+        <button class="res" data-r="combine"><b>Combine both</b><span>Guard, plus the window</span></button>
+      </div>
+      <div class="res-hint">Try a wrong one first, that is the interesting case.</div>
+      <div id="resOut"></div>
+    </div>
+    ${cf('Without version control, what happens instead',
+      `Both analysts have the file open. Alex saves last. <b>Sam’s missing-value check is simply gone , 
+       no marker, no message, no record that it ever existed.</b> Nobody finds out until the pipeline
+       breaks on a null six weeks later, and by then the change looks like it was never made.
+       <span class="q">Git refuses to guess. Drive lacks the project context Git makes explicit.</span>`)}
+  </div>`,
+  after: () => {
+    const out = document.getElementById('resOut');
+    const paint = () => {
+      document.querySelectorAll('.res').forEach(b => b.classList.toggle('on', b.dataset.r === resolution));
+      if (!resolution){ out.innerHTML = ''; return; }
+      const v = VERDICT[resolution];
+      out.innerHTML = `<div class="res-out ${v.cls}">
+        <div class="verdict">${I[v.ic]}${v.head}</div><div class="cm-b">${v.body}</div></div>`
+        + diff(RESOLVED[resolution], 14);
+    };
+    document.querySelectorAll('.res').forEach(b =>
+      b.addEventListener('click', () => { resolution = b.dataset.r; paint(); syncGraph(step); }));
+    paint();
+  },
+  what:'Git does a three-way merge: it finds the common ancestor and compares each side to it. Different regions merge silently. If the same region changed two ways, Git writes both versions into the file rather than picking one.',
+  why:'A conflict is not a failure. It is Git declining to make a judgement it is not qualified to make. Resolving one means working out what both people were trying to do, not picking a side. The mistake novices make is treating it as a contest.',
+  notes:'<b>Drive versions files; Git versions a reviewed project state.</b> That is the sharper argument for version control. <b>Habits that keep conflicts rare:</b> small branches, pull main daily, auto-format on commit so formatting changes never conflict, rough module ownership, and strip notebook outputs, otherwise you conflict on base64-encoded PNGs.'
+},
+{
+  nav:'CI fails', eyebrow:'Step 8 · The checks re-run', title:'A clean merge is not a correct merge',
+  build: () => {
+    if (!resolution) return card('Pick a resolution first','step 7',
+      `<p class="note" style="margin-bottom:13px">The checks below depend on which resolution you chose.</p>
+       <button class="jump" data-go="7">Back to the conflict</button>`);
+    const failing = resolution === 'ours';
+    const side = failing
+      ? card('Failure output','pytest', term([
+          ['out','FAILED tests/test_features.py::test_handles_null_account age'],
+          '',
+          ['out','    df = sample_with_nulls()'],
+          ['out','    labels = find_lost_customers(df)'],
+          ['warn','>   assert labels.notna().all()'],
+          ['warn','E   AssertionError: 214 of 48,112 labels are blank'],
+          '',
+          ['out','1 failed, 13 passed in 62.4s']
+        ]), true)
+      : card('Bot comment on the pull request','intercept-ci', `
+          <div class="cm-h"><span class="av">CI</span><span class="cm-a">intercept-ci</span>
+            <span class="kind ${resolution === 'theirs' ? 'nit' : 'ok'}">score check</span></div>
+          <div class="kv">
+            <span class="k">score</span><span class="v ${resolution==='theirs'?'':'hi'}">${resolution === 'theirs' ? '0.81 → 0.81 &nbsp;(no change)' : '0.81 → 0.84 &nbsp;(+0.03)'}</span><br>
+            <span class="k">customers lost</span><span class="v ${resolution==='theirs'?'':'hi'}">${resolution === 'theirs' ? '4.1% → 4.1% &nbsp;(no change)' : '4.1% → 5.3% &nbsp;(+1.2pp)'}</span></div>
+          ${resolution === 'theirs' ? '<p class="note" style="margin-top:12px">Every check is green and the pull request delivers nothing, the window reverted to 30 days in the resolution. <b>No automated check can catch this.</b> The reviewer has to.</p>' : ''}`);
+    return `<div class="grid">
+      <div class="card hero"><div class="card-h">
+        <span class="dot" style="background:var(--${failing ? 'fail' : 'pass'})"></span>
+        <span class="t">Checks</span><span class="f">re-run on c15e8f3</span></div>
+        <div class="card-b flush" id="ciHost2"></div></div>
+      ${side}</div>`;
+  },
+  after: () => {
+    const host = document.getElementById('ciHost2');
+    const j = document.querySelector('.jump');
+    if (j) j.addEventListener('click', () => go(+j.dataset.go));
+    if (!host) return;
+    const failing = resolution === 'ours';
+    runCI(host, CHECKS({ testFail: failing,
+      gate: resolution === 'theirs' ? 'score 0.81 vs baseline 0.81, no change'
+                                    : 'score 0.84 vs baseline 0.81 (tol −0.02)' }));
+  },
+  what:() => !resolution ? 'Choose how to resolve the conflict in step 7, what the checks do next depends on it.'
+      : resolution === 'ours'
+      ? 'Keeping only Alex’s side merged cleanly. Git had no complaint at all, and the test suite failed. 214 customers with a missing account age now produce blank labels.'
+      : resolution === 'theirs'
+      ? 'Every check passes. The pipeline is correct, reproducible, and delivers exactly nothing, because the resolution quietly reverted the window to 30 days.'
+      : 'Both changes survived. The full suite passes and the score check reports the improvement the pull request promised.',
+  why:'This is the step that connects merging to CI. Git guarantees the text lines up. It has no idea what the code means, so it will happily merge a column rename in one file with a filter using the old name in another. Automated checks are the only thing that catches that class of bug, which is why merge discipline and CI are one argument rather than two.',
+  notes:() => resolution === 'theirs'
+      ? '<b>This is the most useful case to be asked about.</b> It marks the boundary of what automation can do: CI verifies the pipeline is correct, and only a human verifies it is worth shipping. It is also the argument for the “what number moved” field, the reviewer can see at a glance that nothing did.'
+      : '<b>Try “keep theirs” too</b>, it produces a fully green pipeline that delivers nothing, which is the sharpest illustration of what CI cannot do. <b>On check design:</b> start with three fast checks and add one at a time. A check nobody trusts is worse than no check, so delete any check that false-alarms twice.'
+},
+{
+  nav:'Merge & tag', eyebrow:'Step 9 · Merge and tag',
+  title: () => resolution === 'ours' ? 'main is protected, so this never reaches the client'
+                                     : 'The loop closes on the deliverable',
+  build: () => {
+    if (resolution === 'ours') return `<div class="grid two">
+      ${card('Merge blocked','branch protection', `
+        <div class="cm-h"><span class="av" style="background:var(--fail)">!</span>
+          <span class="cm-a">main</span><span class="kind block">blocked</span></div>
+        <p class="note">A required status check is failing, so this pull request cannot merge. There is no override and no admin bypass.</p>
+        <p class="note" style="margin-top:11px">This is branch protection doing the one job it exists for: the broken change never reaches main, so it never reaches the client.</p>
+        <p style="margin-top:16px"><button class="jump" data-go="7">Go back and combine both changes</button></p>`, false, true)}
+      ${card('Notice what did not have to happen','counterfactual', `<ul class="rules no">
+        <li>${I.no}<span>Nobody had to notice the bug by eye</span></li>
+        <li>${I.no}<span>Nobody had to remember to re-run the tests</span></li>
+        <li>${I.no}<span>No deadline pressure could talk anyone into shipping it</span></li>
+      </ul>`, true)}
+    </div>`;
+    return `<div class="grid two">
+      ${card('Terminal','', term([
+        ['out','# merge and tidyd via GitHub · branch deleted'],
+        ['cmd','git switch main && git pull'],
+        ['out','Updating e8b0c31..b7a2d09'],
+        '',
+        ['cmd','git tag -a report/2026-q3 -m "Delivered 2026-08-14"'],
+        ['cmd','git push origin report/2026-q3'],
+        ['good','✓ CD pipeline built the deliverable from b7a2d09']
+      ]), true)}
+      <div class="card hero">
+        <div class="card-h"><span class="t">Rebuild any past deliverable</span>
+          <span class="f">the whole point</span></div>
+        <div class="tm-bar" id="tmBar">
+          <button class="tm" data-t="q3">report/2026-q3</button>
+          <button class="tm" data-t="q2">report/2026-q2</button>
+        </div>
+        <div class="card-b" id="tmOut"></div>
+      </div>
+    </div>
+    <div style="margin-top:18px">${cf('Without version control, what happens instead',
+      'The deliverable is a spreadsheet in a folder. In November, the client queries the August figure. <b>Nobody can say which version of the code produced it, which data pull it read, or which library versions were installed that week.</b> The honest answer becomes \u201cwe would have to rebuild it and hope it matches\u201d, which is the sentence this whole workflow exists to make unnecessary.')}</div>`;
+  },
+  after: () => {
+    const j = document.querySelector('.jump');
+    if (j) j.addEventListener('click', () => go(+j.dataset.go));
+    const bar = $('tmBar'); if (!bar) return;
+    const paint = t => {
+      const d = TAGS[t];
+      bar.querySelectorAll('.tm').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+      $('tmOut').innerHTML = term([
+        ['cmd', 'git checkout ' + d.tag],
+        ['cmd', 'uv sync --frozen'],
+        ['cmd', 'make report'],
+        ['good', '\u2713 rebuilt ' + d.file]
+      ]) + '<div class="kv" style="padding:2px 2px 0">'
+        + '<span class="k">built from</span><span class="v hi">' + d.sha + '</span><br>'
+        + '<span class="k">data</span><span class="v">' + d.data + '</span><br>'
+        + '<span class="k">environment</span><span class="v">' + d.env + '</span><br>'
+        + '<span class="k">window</span><span class="v">' + d.waited + '</span><br>'
+        + '<span class="k">seed</span><span class="v">20260601</span></div>'
+        + '<div class="kv" style="padding:11px 2px 0;margin-top:10px;border-top:1px solid var(--rule)">'
+        + '<span class="k">customers lost</span><span class="v hi">' + d.lost + '</span><br>'
+        + '<span class="k">model score</span><span class="v hi">' + d.score + '</span></div>'
+        + '<p class="note" style="margin-top:12px">' + d.note + '</p>';
+    };
+    bar.querySelectorAll('.tm').forEach(b => b.addEventListener('click', () => paint(b.dataset.t)));
+    paint('q3');
+  },
+  what:() => resolution === 'ours'
+      ? 'The pull request cannot merge. A required check is red, main is protected, and there is no override.'
+      : 'Merge and tidyd into main, branch deleted, deliverable tagged. The CD pipeline rebuilt the artifact and stamped the commit SHA onto it.',
+  why:'CD here does not mean deploying to production, it means the accepted change automatically becomes the client artifact, carrying the SHA that produced it. That turns reproducibility from a policy someone has to remember into a property of the file itself.',
+  notes:'<b>This is the thesis, and the answer to the problem in the brief.</b> Ask us in November to rebuild these numbers: check out the tag, restore the exact software versions, read the immutable data path, run it. <b>The three decisions that actually matter</b> are protected main from day one, notebooks never being the deliverable, and every client artifact carrying its SHA. Everything else is reversible.'
+}
+];
+
+/* ══════════════════════════════════════════════════════════════
+   DRIVER
+   ══════════════════════════════════════════════════════════════ */
+let step = 0;
+const $ = id => document.getElementById(id);
+const val = v => typeof v === 'function' ? v() : v;
+
+function buildProg(){
+  $('prog').innerHTML = STEPS.map((s, i) =>
+    `<button class="seg" data-i="${i}" title="${i + 1}. ${s.nav}" aria-label="Step ${i+1}: ${s.nav}"></button>`).join('');
+  $('prog').querySelectorAll('.seg').forEach(b =>
+    b.addEventListener('click', () => go(+b.dataset.i)));
+}
+
+function render(){
+  const s = STEPS[step];
+  ciToken++;                                        // cancel any in-flight CI animation
+  $('stage').innerHTML =
+    `<div class="stage-head"><div class="eyebrow">${s.eyebrow}</div><h1>${val(s.title)}</h1></div>`
+    + `<div class="anim">${s.build()}</div>`;
+  if (s.after) s.after();
+  document.querySelectorAll('.cf-t').forEach(b =>
+    b.addEventListener('click', () => b.parentElement.classList.toggle('open')));
+
+  $('what').innerHTML   = val(s.what);
+  $('why').innerHTML    = val(s.why);
+  $('pnotes').innerHTML = val(s.notes);
+  $('counter').innerHTML = `<b>${String(step + 1).padStart(2,'0')}</b> / ${STEPS.length}`;
+  $('prev').disabled = step === 0;
+  $('next').disabled = step === STEPS.length - 1;
+  $('next').textContent = step === STEPS.length - 1 ? 'End' : 'Next →';
+  $('prog').querySelectorAll('.seg').forEach((b, i) => {
+    b.classList.toggle('done', i < step); b.classList.toggle('now', i === step);
+  });
+  ringNode('d3', step >= 8 && resolution === 'ours');
+  syncGraph(step);
+  $('stage').scrollTop = 0;
+}
+
+function go(i){ step = Math.max(0, Math.min(STEPS.length - 1, i)); render(); }
+
+$('next').addEventListener('click', () => go(step + 1));
+$('prev').addEventListener('click', () => go(step - 1));
+$('notesBtn').addEventListener('click', e => {
+  const hidden = $('pnotes').classList.toggle('off');
+  e.currentTarget.setAttribute('aria-pressed', String(!hidden));
+});
+const dismiss = () => { $('cover').classList.add('gone'); $('stage').focus(); };
+$('start').addEventListener('click', dismiss);
+$('inspX').addEventListener('click', closeInsp);
+$('keysBtn').addEventListener('click', () => $('keys').classList.toggle('open'));
+$('keys').addEventListener('click', () => $('keys').classList.remove('open'));
+
+addEventListener('keydown', e => {
+  if (!$('cover').classList.contains('gone')){
+    if (e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' '){ e.preventDefault(); dismiss(); }
+    return;
+  }
+  if (e.key === 'Escape'){
+    $('keys').classList.remove('open');
+    if (selected) closeInsp();
+    return;
+  }
+  if (e.key === '?'){ $('keys').classList.toggle('open'); return; }
+  if (e.target.matches('button')) return;
+  if (e.key === 'ArrowRight') go(step + 1);
+  if (e.key === 'ArrowLeft')  go(step - 1);
+  if (/^[1-9]$/.test(e.key))  go(+e.key - 1);          // jump straight to a step
+  if (e.key === 'r' || e.key === 'R') render();        // replay the checks
+  if (e.key === 'n' || e.key === 'N') $('notesBtn').click();
+});
+
+buildProg();
+buildGraph($('graph'));
+buildGraph($('coverArt'), 184);                     // the same graph, drawn on the cover
+$('coverArt').querySelectorAll('.glabel').forEach(l => l.remove());
+requestAnimationFrame(() => {                       // let the cover graph draw itself in
+  $('coverArt').querySelectorAll('.gpath').forEach(p => p.style.strokeDashoffset = 0);
+  $('coverArt').querySelectorAll('.gnode').forEach(c => { c.style.transform='scale(1)'; c.style.opacity=1; });
+});
+render();
+</script>
+</body>
+</html>
