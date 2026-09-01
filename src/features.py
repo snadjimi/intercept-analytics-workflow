@@ -18,9 +18,9 @@ def find_lost_customers(
     prediction.
     """
     inactivity = pd.to_numeric(customers["last_active_days"], errors="coerce").fillna(0)
-    account_age = pd.to_numeric(
-        customers["account_age_days"], errors="coerce"
-    ).fillna(0)
+    account_age = pd.to_numeric(customers["account_age_days"], errors="coerce").fillna(
+        0
+    )
 
     lost = (inactivity > quiet_days) & (account_age >= minimum_account_age_days)
     return lost.astype(int).rename("predicted_lost")

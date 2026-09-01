@@ -29,9 +29,7 @@ def test_missing_account_age_never_produces_null_label():
 
 
 def test_new_accounts_are_not_called_lost():
-    customers = pd.DataFrame(
-        {"last_active_days": [120], "account_age_days": [45]}
-    )
+    customers = pd.DataFrame({"last_active_days": [120], "account_age_days": [45]})
     assert find_lost_customers(customers, quiet_days=60).tolist() == [0]
 
 

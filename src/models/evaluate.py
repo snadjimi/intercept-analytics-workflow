@@ -47,7 +47,9 @@ def evaluate(customers_path: Path, baseline_path: Path, out_path: Path) -> dict:
     }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    out_path.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     print(
         f"accuracy {baseline['accuracy']:.2f} -> {accuracy:.2f}; "
